@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.DS_Store
+
+# Your own recorded sessions. data/sample_session.csv is checked in on purpose
+# so the dashboard can be replayed without hardware.
+data/*.csv
+!data/sample_session.csv

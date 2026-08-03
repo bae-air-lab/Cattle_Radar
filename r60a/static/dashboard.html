@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R60A mmWave radar</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series-1: #2a78d6;   /* heart rate  */
+    --series-2: #eb6834;   /* breathing   */
+    --series-3: #1baf7a;   /* distance    */
+    --track-1: #cde2fb;
+    --track-2: #86b6ef;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --shadow: 0 1px 2px rgba(11, 11, 11, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --track-1: #184f95;
+      --track-2: #256abf;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --track-1: #184f95;
+    --track-2: #256abf;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1360px; margin: 0 auto; padding: 24px 20px 64px; }
+
+  /* ---- header ---- */
+  header.top {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding-bottom: 16px; margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin: 2px 0 0; }
+  .spacer { flex: 1 1 auto; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-1);
+    font-size: 12.5px; color: var(--text-secondary); white-space: nowrap;
+  }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; }
+  .chip.good .dot { background: var(--good); }
+  .chip.warning .dot { background: var(--warning); }
+  .chip.critical .dot { background: var(--critical); }
+  .chip .ico { font-size: 12px; line-height: 1; }
+  .chip strong { color: var(--text-primary); font-weight: 600; }
+
+  button.ghost {
+    font: inherit; font-size: 12.5px; cursor: pointer;
+    padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-secondary);
+  }
+  button.ghost:hover { color: var(--text-primary); }
+  button.ghost[aria-pressed="true"] { color: var(--text-primary); border-color: var(--axis); }
+
+  /* ---- cards ---- */
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .card h2 {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted); margin: 0 0 2px;
+  }
+  .card .note { font-size: 12px; color: var(--text-muted); margin: 0; }
+
+  .grid { display: grid; gap: 14px; }
+  .kpi { grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); margin-bottom: 14px; }
+  .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 14px; }
+  .lower {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    align-items: start; margin-bottom: 14px;
+  }
+  @media (max-width: 900px) {
+    .charts, .lower { grid-template-columns: 1fr; }
+  }
+
+  /* ---- stat tiles ---- */
+  .stat .label { font-size: 12px; color: var(--text-muted); margin: 0 0 6px; }
+  .stat .value {
+    font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1;
+  }
+  .stat .value .unit { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: 5px; letter-spacing: 0; }
+  .stat .meta { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+  .hero .value { font-size: 54px; }
+  .stale { opacity: 0.42; }
+
+  .meter-track {
+    height: 8px; border-radius: 999px; background: var(--track-1);
+    margin-top: 10px; overflow: hidden;
+  }
+  .meter-fill { height: 100%; border-radius: 999px; background: var(--series-1); width: 0; transition: width 240ms ease; }
+
+  /* ---- charts ---- */
+  .chart-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .chart-head .now { margin-left: auto; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  .chart-head .now .unit { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-left: 4px; }
+  svg { display: block; width: 100%; overflow: visible; }
+  svg text { font-family: inherit; }
+  .tick { font-size: 10.5px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .endlabel { font-size: 11.5px; fill: var(--text-secondary); font-weight: 600; }
+  .gridline { stroke: var(--grid); stroke-width: 1; }
+  .axisline { stroke: var(--axis); stroke-width: 1; }
+  .empty { fill: var(--text-muted); font-size: 12px; }
+
+  .tooltip {
+    position: fixed; z-index: 20; pointer-events: none; opacity: 0;
+    transition: opacity 90ms ease;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; font-size: 12px; line-height: 1.5;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.18); white-space: nowrap;
+  }
+  .tooltip .k { color: var(--text-muted); }
+  .tooltip b { font-weight: 600; }
+
+  /* ---- tables ---- */
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th {
+    text-align: left; font-weight: 600; color: var(--text-muted);
+    font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  td {
+    padding: 6px 10px 6px 0; border-bottom: 1px solid var(--grid);
+    color: var(--text-secondary); vertical-align: top; white-space: nowrap;
+  }
+  td.num { font-variant-numeric: tabular-nums; }
+  td.name { color: var(--text-primary); font-weight: 500; }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; color: var(--text-secondary);
+  }
+  .tag {
+    display: inline-block; padding: 1px 7px; border-radius: 5px;
+    border: 1px solid var(--border); font-size: 11px; color: var(--text-secondary);
+  }
+  .tag.unknown { border-color: var(--warning); color: var(--text-primary); }
+  .tag.bad { border-color: var(--critical); color: var(--text-primary); }
+  .log { max-height: 300px; overflow-y: auto; }
+  .log td { border-bottom: none; padding: 3px 10px 3px 0; }
+  .hidden { display: none !important; }
+  footer.legendbar {
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border);
+    color: var(--text-muted); font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>R60A mmWave radar</h1>
+      <p class="subtitle" id="subtitle">connecting&hellip;</p>
+    </div>
+    <div class="spacer"></div>
+    <span class="chip" id="link-chip"><span class="dot"></span><span id="link-text">starting</span></span>
+    <span class="chip" id="rate-chip"><strong id="rate-val">0.0</strong> frames/s</span>
+    <span class="chip" id="health-chip"><span class="ico" aria-hidden="true">&#9888;</span><span id="health-text">0 bad &middot; 0 unknown</span></span>
+    <button class="ghost" id="table-toggle" aria-pressed="false">Table view</button>
+    <button class="ghost" id="theme-toggle">Theme</button>
+  </header>
+
+  <!-- KPI row -->
+  <section class="grid kpi" aria-label="Current readings">
+    <div class="card stat" id="tile-presence">
+      <p class="label">Occupancy</p>
+      <div class="value" id="presence-val">&mdash;</div>
+      <div class="meta" id="presence-meta">no report yet</div>
+    </div>
+
+    <div class="card stat hero" id="tile-heart">
+      <p class="label">Heart rate</p>
+      <div class="value"><span id="heart-val">&mdash;</span><span class="unit">bpm</span></div>
+      <div class="meta" id="heart-meta">waiting</div>
+    </div>
+
+    <div class="card stat" id="tile-breath">
+      <p class="label">Breathing rate</p>
+      <div class="value"><span id="breath-val">&mdash;</span><span class="unit">breaths/min</span></div>
+      <div class="meta" id="breath-meta">waiting</div>
+    </div>
+
+    <div class="card stat" id="tile-distance">
+      <p class="label">Target distance</p>
+      <div class="value"><span id="distance-val">&mdash;</span><span class="unit">cm</span></div>
+      <div class="meta" id="distance-meta">waiting</div>
+    </div>
+
+    <div class="card stat" id="tile-movement">
+      <p class="label">Body movement</p>
+      <div class="value"><span id="movement-val">&mdash;</span><span class="unit">/ 100</span></div>
+      <div class="meter-track"><div class="meter-fill" id="movement-fill"></div></div>
+      <div class="meta" id="movement-meta">waiting</div>
+    </div>
+  </section>
+
+  <!-- time series -->
+  <section class="grid charts" aria-label="Trends">
+    <div class="card">
+      <div class="chart-head">
+        <div>
+          <h2>Heart rate</h2>
+          <p class="note">beats per minute</p>
+        </div>
+        <div class="now"><span id="chart-heart-now">&mdash;</span><span class="unit">bpm</span></div>
+      </div>
+      <svg id="chart-heart" height="150" role="img" aria-label="Heart rate over time"></svg>
+    </div>
+
+    <div class="card">
+      <div class="chart-head">
+        <div>
+          <h2>Breathing rate</h2>
+          <p class="note">breaths per minute</p>
+        </div>
+        <div class="now"><span id="chart-breath-now">&mdash;</span><span class="unit">br/min</span></div>
+      </div>
+      <svg id="chart-breath" height="150" role="img" aria-label="Breathing rate over time"></svg>
+    </div>
+
+    <div class="card">
+      <div class="chart-head">
+        <div>
+          <h2>Target distance</h2>
+          <p class="note">centimetres from the sensor</p>
+        </div>
+        <div class="now"><span id="chart-distance-now">&mdash;</span><span class="unit">cm</span></div>
+      </div>
+      <svg id="chart-distance" height="150" role="img" aria-label="Target distance over time"></svg>
+    </div>
+
+    <div class="card">
+      <div class="chart-head">
+        <div>
+          <h2>Body movement</h2>
+          <p class="note">magnitude, 0&ndash;100</p>
+        </div>
+        <div class="now"><span id="chart-movement-now">&mdash;</span></div>
+      </div>
+      <svg id="chart-movement" height="150" role="img" aria-label="Body movement magnitude over time"></svg>
+    </div>
+  </section>
+
+  <!-- position + inventory -->
+  <section class="grid lower">
+    <div class="card">
+      <div class="chart-head">
+        <div>
+          <h2>Target position</h2>
+          <p class="note">plan view from above &middot; sensor at the origin &middot; rings every 50&nbsp;cm</p>
+        </div>
+        <div class="now" id="position-now" style="font-size:14px;font-weight:500;color:var(--text-secondary)">&mdash;</div>
+      </div>
+      <svg id="chart-position" height="330" role="img" aria-label="Target position, plan view"></svg>
+    </div>
+
+    <div class="card">
+      <h2>Message inventory</h2>
+      <p class="note">every (control, command) pair seen on the wire</p>
+      <div class="scroll" style="margin-top:10px">
+        <table>
+          <thead>
+            <tr><th>Control</th><th>Command</th><th>Meaning</th><th>Count</th><th>Last payload</th></tr>
+          </thead>
+          <tbody id="messages-body">
+            <tr><td colspan="5" style="color:var(--text-muted)">waiting for frames&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- raw log -->
+  <section class="card" style="margin-bottom:14px">
+    <h2>Raw frame log</h2>
+    <p class="note">newest first &middot; bytes exactly as received, checksum verified</p>
+    <div class="scroll log" style="margin-top:10px">
+      <table>
+        <thead><tr><th>Time</th><th>Pair</th><th>Meaning</th><th>Decoded</th><th>Raw bytes</th></tr></thead>
+        <tbody id="log-body">
+          <tr><td colspan="5" style="color:var(--text-muted)">waiting for frames&hellip;</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- table view (the WCAG-clean twin of every chart) -->
+  <section class="card hidden" id="table-view">
+    <h2>Data table</h2>
+    <p class="note">every plotted value, newest first &mdash; the text equivalent of the charts above</p>
+    <div class="scroll log" style="margin-top:10px">
+      <table>
+        <thead><tr><th>Time</th><th>Field</th><th>Value</th><th>Unit</th></tr></thead>
+        <tbody id="table-view-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="legendbar" id="legendbar"></footer>
+</div>
+
+<div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const el = (id) => document.getElementById(id);
+const tooltip = el("tooltip");
+
+let latest = null;          // most recent snapshot from the server
+const chartHover = {};      // chart id -> hovered index
+
+/* ---------- small helpers ---------- */
+
+function svgEl(name, attrs) {
+  const node = document.createElementNS(SVG_NS, name);
+  for (const key in attrs) node.setAttribute(key, attrs[key]);
+  return node;
+}
+
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+function fmt(value, digits) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value !== "number") return String(value);
+  return value.toFixed(digits === undefined ? 0 : digits);
+}
+
+function agoText(ts, now) {
+  if (!ts) return "no data";
+  const dt = now - ts;
+  if (dt < 1.5) return "just now";
+  if (dt < 60) return dt.toFixed(0) + "s ago";
+  return (dt / 60).toFixed(1) + " min ago";
+}
+
+function clockText(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], { hour12: false }) +
+    "." + String(d.getMilliseconds()).padStart(3, "0");
+}
+
+function hex2(n) { return "0x" + n.toString(16).padStart(2, "0"); }
+
+function niceTicks(min, max, count) {
+  if (min === max) { min -= 1; max += 1; }
+  const raw = (max - min) / Math.max(1, count);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm >= 5 ? 10 : norm >= 2 ? 5 : norm >= 1 ? 2 : 1) * mag;
+  const out = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) {
+    out.push(Math.round(v * 1e6) / 1e6);
+  }
+  return out;
+}
+
+function showTooltip(evt, html) {
+  tooltip.innerHTML = html;
+  tooltip.style.opacity = "1";
+  const pad = 14;
+  const rect = tooltip.getBoundingClientRect();
+  let x = evt.clientX + pad;
+  let y = evt.clientY - rect.height - pad;
+  if (x + rect.width > window.innerWidth - 8) x = evt.clientX - rect.width - pad;
+  if (y < 8) y = evt.clientY + pad;
+  tooltip.style.left = x + "px";
+  tooltip.style.top = y + "px";
+}
+
+function hideTooltip() { tooltip.style.opacity = "0"; }
+
+/* ---------- line chart ---------- */
+/* One series per chart, so no legend box is needed: the card title names it.
+   The last point is direct-labelled; a crosshair + tooltip carries the rest. */
+
+function renderLine(svgId, points, opts) {
+  const svg = el(svgId);
+  const width = svg.clientWidth || svg.parentNode.clientWidth || 320;
+  const height = Number(svg.getAttribute("height"));
+  clear(svg);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  const pad = { top: 10, right: 46, bottom: 22, left: 38 };
+  const plotW = Math.max(10, width - pad.left - pad.right);
+  const plotH = Math.max(10, height - pad.top - pad.bottom);
+
+  if (!points || points.length === 0) {
+    svg.appendChild(Object.assign(
+      svgEl("text", { x: width / 2, y: height / 2, "text-anchor": "middle", class: "empty" }),
+      { textContent: "no data yet" }));
+    return;
+  }
+
+  const values = points.map((p) => p[1]);
+  let lo = Math.min.apply(null, values);
+  let hi = Math.max.apply(null, values);
+  if (opts.floor !== undefined) lo = Math.min(lo, opts.floor);
+  const span = hi - lo;
+  const margin = span === 0 ? Math.max(1, Math.abs(hi) * 0.1) : span * 0.18;
+  lo -= margin; hi += margin;
+  if (opts.clampZero && lo < 0) lo = 0;
+
+  const t0 = points[0][0];
+  const t1 = points[points.length - 1][0];
+  const tSpan = Math.max(1e-3, t1 - t0);
+  const sx = (t) => pad.left + ((t - t0) / tSpan) * plotW;
+  const sy = (v) => pad.top + plotH - ((v - lo) / (hi - lo)) * plotH;
+
+  // recessive solid hairline grid + y ticks
+  for (const tick of niceTicks(lo, hi, 3)) {
+    const y = sy(tick);
+    if (y < pad.top - 1 || y > pad.top + plotH + 1) continue;
+    svg.appendChild(svgEl("line", { x1: pad.left, y1: y, x2: pad.left + plotW, y2: y, class: "gridline" }));
+    svg.appendChild(Object.assign(
+      svgEl("text", { x: pad.left - 7, y: y + 3.5, "text-anchor": "end", class: "tick" }),
+      { textContent: String(tick) }));
+  }
+
+  // baseline
+  svg.appendChild(svgEl("line", {
+    x1: pad.left, y1: pad.top + plotH, x2: pad.left + plotW, y2: pad.top + plotH, class: "axisline" }));
+
+  // x labels: elapsed window
+  svg.appendChild(Object.assign(
+    svgEl("text", { x: pad.left, y: height - 6, class: "tick" }),
+    { textContent: "−" + Math.round(tSpan) + "s" }));
+  svg.appendChild(Object.assign(
+    svgEl("text", { x: pad.left + plotW, y: height - 6, "text-anchor": "end", class: "tick" }),
+    { textContent: "now" }));
+
+  // area wash at ~10% + 2px line
+  const line = points.map((p, i) => (i ? "L" : "M") + sx(p[0]).toFixed(2) + " " + sy(p[1]).toFixed(2)).join(" ");
+  svg.appendChild(svgEl("path", {
+    d: line + ` L ${sx(t1).toFixed(2)} ${(pad.top + plotH).toFixed(2)} L ${sx(t0).toFixed(2)} ${(pad.top + plotH).toFixed(2)} Z`,
+    fill: opts.color, "fill-opacity": "0.10", stroke: "none" }));
+  svg.appendChild(svgEl("path", {
+    d: line, fill: "none", stroke: opts.color, "stroke-width": "2",
+    "stroke-linejoin": "round", "stroke-linecap": "round" }));
+
+  // end marker: >=8px dot with a 2px surface ring
+  const last = points[points.length - 1];
+  svg.appendChild(svgEl("circle", {
+    cx: sx(last[0]), cy: sy(last[1]), r: 4.5,
+    fill: opts.color, stroke: "var(--surface-1)", "stroke-width": "2" }));
+  svg.appendChild(Object.assign(
+    svgEl("text", { x: Math.min(sx(last[0]) + 9, width - 2), y: sy(last[1]) + 4, class: "endlabel" }),
+    { textContent: fmt(last[1], opts.digits) }));
+
+  // hover: crosshair + tooltip, hit area spans the whole plot
+  const cross = svgEl("line", {
+    y1: pad.top, y2: pad.top + plotH, class: "gridline", stroke: "var(--axis)", visibility: "hidden" });
+  const focus = svgEl("circle", {
+    r: 4.5, fill: opts.color, stroke: "var(--surface-1)", "stroke-width": "2", visibility: "hidden" });
+  svg.appendChild(cross);
+  svg.appendChild(focus);
+
+  const hit = svgEl("rect", {
+    x: pad.left, y: pad.top, width: plotW, height: plotH, fill: "transparent", cursor: "crosshair" });
+  hit.addEventListener("mousemove", (evt) => {
+    const box = svg.getBoundingClientRect();
+    const px = ((evt.clientX - box.left) / box.width) * width;
+    let best = 0, bestDist = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = Math.abs(sx(points[i][0]) - px);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    const point = points[best];
+    cross.setAttribute("x1", sx(point[0]));
+    cross.setAttribute("x2", sx(point[0]));
+    cross.setAttribute("visibility", "visible");
+    focus.setAttribute("cx", sx(point[0]));
+    focus.setAttribute("cy", sy(point[1]));
+    focus.setAttribute("visibility", "visible");
+    showTooltip(evt,
+      `<b>${fmt(point[1], opts.digits)}</b> <span class="k">${opts.unit || ""}</span><br>` +
+      `<span class="k">${clockText(point[0])}</span>`);
+  });
+  hit.addEventListener("mouseleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    focus.setAttribute("visibility", "hidden");
+    hideTooltip();
+  });
+  svg.appendChild(hit);
+}
+
+/* ---------- position plan view ---------- */
+
+function renderPosition(track) {
+  const svg = el("chart-position");
+  const width = svg.clientWidth || svg.parentNode.clientWidth || 420;
+  const height = Number(svg.getAttribute("height"));
+  clear(svg);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  const pad = { top: 14, right: 14, bottom: 26, left: 14 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const originX = pad.left + plotW / 2;
+  const originY = pad.top + plotH;
+
+  // Scale to the observed range (never below 100 cm) so a close target does
+  // not collapse into the origin, rounded up to a whole 50 cm ring.
+  let maxR = 0;
+  for (const p of track) maxR = Math.max(maxR, Math.hypot(p[1], p[2]));
+  maxR = Math.max(100, Math.ceil((maxR * 1.25) / 50) * 50);
+  const scale = Math.min(plotW / 2, plotH) / maxR;
+
+  // range rings every 50 cm, hairline and solid
+  for (let r = 50; r <= maxR; r += 50) {
+    svg.appendChild(svgEl("path", {
+      d: `M ${originX - r * scale} ${originY} A ${r * scale} ${r * scale} 0 0 1 ${originX + r * scale} ${originY}`,
+      fill: "none", class: "gridline" }));
+    // Label on the left arm of the arc, clear of the region where a target sits.
+    svg.appendChild(Object.assign(
+      svgEl("text", { x: originX - r * scale + 4, y: originY - 6, class: "tick" }),
+      { textContent: r + " cm" }));
+  }
+  // bearing guides at +/-30 and +/-60 degrees
+  for (const deg of [-60, -30, 0, 30, 60]) {
+    const rad = (deg * Math.PI) / 180;
+    svg.appendChild(svgEl("line", {
+      x1: originX, y1: originY,
+      x2: originX + Math.sin(rad) * maxR * scale,
+      y2: originY - Math.cos(rad) * maxR * scale,
+      class: "gridline" }));
+  }
+  svg.appendChild(svgEl("line", {
+    x1: pad.left, y1: originY, x2: pad.left + plotW, y2: originY, class: "axisline" }));
+  svg.appendChild(Object.assign(
+    svgEl("text", { x: originX, y: height - 8, "text-anchor": "middle", class: "tick" }),
+    { textContent: "sensor" }));
+
+  if (!track || track.length === 0) {
+    svg.appendChild(Object.assign(
+      svgEl("text", { x: width / 2, y: pad.top + plotH / 2, "text-anchor": "middle", class: "empty" }),
+      { textContent: "no target reported yet" }));
+    return;
+  }
+
+  // trail: older points recede toward the surface
+  const n = track.length;
+  for (let i = 0; i < n - 1; i++) {
+    const p = track[i];
+    const age = (i + 1) / n;
+    svg.appendChild(svgEl("circle", {
+      cx: originX + p[1] * scale, cy: originY - p[2] * scale,
+      r: 2 + age * 1.5, fill: "var(--series-1)", "fill-opacity": (0.08 + age * 0.32).toFixed(3) }));
+  }
+
+  const cur = track[n - 1];
+  const cx = originX + cur[1] * scale;
+  const cy = originY - cur[2] * scale;
+  svg.appendChild(svgEl("line", {
+    x1: originX, y1: originY, x2: cx, y2: cy,
+    stroke: "var(--series-1)", "stroke-width": "1", "stroke-opacity": "0.35" }));
+  svg.appendChild(svgEl("circle", {
+    cx: cx, cy: cy, r: 6, fill: "var(--series-1)",
+    stroke: "var(--surface-1)", "stroke-width": "2" }));
+  svg.appendChild(Object.assign(
+    svgEl("text", {
+      x: Math.min(cx + 11, width - 4), y: cy + 4,
+      "text-anchor": cx > width - 70 ? "end" : "start", class: "endlabel" }),
+    { textContent: `x ${cur[1]} · y ${cur[2]} cm` }));
+
+  const hit = svgEl("circle", { cx: cx, cy: cy, r: 14, fill: "transparent", cursor: "pointer" });
+  hit.addEventListener("mousemove", (evt) => showTooltip(evt,
+    `<b>x ${cur[1]} cm</b> &middot; <b>y ${cur[2]} cm</b> &middot; z ${cur[3]} cm<br>` +
+    `<span class="k">range ${Math.hypot(cur[1], cur[2]).toFixed(0)} cm &middot; ${clockText(cur[0])}</span>`));
+  hit.addEventListener("mouseleave", hideTooltip);
+  svg.appendChild(hit);
+}
+
+/* ---------- tiles ---------- */
+
+function setStale(tileId, ts, now) {
+  const node = el(tileId);
+  if (!node) return;
+  node.classList.toggle("stale", !ts || now - ts > 8);
+}
+
+function updateTiles(state) {
+  const f = state.fields || {};
+  const now = state.now;
+
+  // Occupancy: the radar reports motion state continuously; presence only on
+  // change, so fall back to motion state and say which one is speaking.
+  const presence = f.presence;
+  const motion = f.motion_state;
+  let occText = "—", occMeta = "no report yet", occTs = null;
+  if (presence) {
+    occText = presence.value ? "Present" : "Absent";
+    occMeta = "presence report · " + agoText(presence.ts, now);
+    occTs = presence.ts;
+  } else if (motion) {
+    const label = motion.label || String(motion.value);
+    occText = motion.value === 0 ? "Absent" : "Present";
+    occMeta = "inferred from motion: " + label + " · " + agoText(motion.ts, now);
+    occTs = motion.ts;
+  }
+  el("presence-val").textContent = occText;
+  el("presence-meta").textContent = occMeta;
+  setStale("tile-presence", occTs, now);
+
+  const tiles = [
+    ["heart", "heart_rate_bpm", 0, "tile-heart"],
+    ["breath", "breathing_rate_bpm", 0, "tile-breath"],
+    ["distance", "target_distance_cm", 0, "tile-distance"],
+    ["movement", "body_movement", 0, "tile-movement"],
+  ];
+  for (const [prefix, fieldName, digits, tileId] of tiles) {
+    const entry = f[fieldName];
+    el(prefix + "-val").textContent = entry ? fmt(entry.value, digits) : "—";
+    el(prefix + "-meta").textContent = entry
+      ? `${entry.count} samples · ${agoText(entry.ts, now)}`
+      : "waiting";
+    setStale(tileId, entry ? entry.ts : null, now);
+  }
+
+  const movement = f.body_movement;
+  el("movement-fill").style.width = movement
+    ? Math.max(0, Math.min(100, Number(movement.value))) + "%" : "0%";
+
+  const posText = (state.track && state.track.length)
+    ? `x ${state.track[state.track.length - 1][1]} · y ${state.track[state.track.length - 1][2]} · z ${state.track[state.track.length - 1][3]} cm`
+    : "—";
+  el("position-now").textContent = posText;
+}
+
+function updateHeader(state) {
+  const chip = el("link-chip");
+  chip.classList.remove("good", "warning", "critical");
+  if (state.connected) {
+    chip.classList.add("good");
+    el("link-text").textContent = state.mode === "replay" ? "Replaying" : "Connected";
+  } else {
+    chip.classList.add("critical");
+    el("link-text").textContent = "Disconnected";
+  }
+
+  el("subtitle").textContent =
+    `${state.port || "—"}${state.baud ? " @ " + state.baud + " baud" : ""} · ` +
+    `${state.stats.frames_ok} frames · up ${Math.round(state.elapsed)}s` +
+    (state.reconnects ? ` · ${state.reconnects} reconnects` : "");
+
+  el("rate-val").textContent = state.frame_rate.toFixed(1);
+
+  const bad = state.stats.bad_checksum, unknown = state.stats.unknown;
+  const health = el("health-chip");
+  health.classList.remove("good", "warning", "critical");
+  health.classList.add(bad > 0 ? "critical" : unknown > 0 ? "warning" : "good");
+  // Icon + label together, so the state never rests on colour alone.
+  health.querySelector(".ico").textContent = (bad || unknown) ? "⚠" : "✓";
+  el("health-text").textContent = `${bad} bad checksum · ${unknown} unknown`;
+  health.title = state.status_detail || "";
+}
+
+function updateMessages(state) {
+  const body = el("messages-body");
+  clear(body);
+  if (!state.messages.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="5" style="color:var(--text-muted)">waiting for frames…</td>';
+    body.appendChild(row);
+    return;
+  }
+  for (const m of state.messages) {
+    const row = document.createElement("tr");
+    const meaning = m.known
+      ? `<span class="tag">${m.name}</span>`
+      : '<span class="tag unknown">unidentified</span>';
+    row.innerHTML =
+      `<td class="num mono">${hex2(m.control)}</td>` +
+      `<td class="num mono">${hex2(m.command)}</td>` +
+      `<td class="name">${meaning}</td>` +
+      `<td class="num">${m.count}</td>` +
+      `<td><code>${m.last_payload || "—"}</code></td>`;
+    body.appendChild(row);
+  }
+}
+
+function decodedText(fields) {
+  const parts = [];
+  for (const key in fields) parts.push(`${key} ${fields[key]}`);
+  return parts.length ? parts.join(", ") : "—";
+}
+
+function updateLog(state) {
+  const body = el("log-body");
+  clear(body);
+  const entries = state.log.slice().reverse();
+  if (!entries.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = '<td colspan="5" style="color:var(--text-muted)">waiting for frames…</td>';
+    body.appendChild(row);
+    return;
+  }
+  for (const entry of entries) {
+    const row = document.createElement("tr");
+    let meaning = `<span class="tag">${entry.name}</span>`;
+    if (!entry.known) meaning = '<span class="tag unknown">unidentified</span>';
+    if (!entry.valid) meaning += ' <span class="tag bad">checksum</span>';
+    row.innerHTML =
+      `<td class="num mono">${clockText(entry.ts)}</td>` +
+      `<td class="num mono">${hex2(entry.control)} ${hex2(entry.command)}</td>` +
+      `<td>${meaning}</td>` +
+      `<td>${decodedText(entry.fields)}</td>` +
+      `<td><code>${entry.hex}</code></td>`;
+    body.appendChild(row);
+  }
+}
+
+const UNITS = {
+  heart_rate_bpm: "bpm",
+  breathing_rate_bpm: "breaths/min",
+  target_distance_cm: "cm",
+  body_movement: "0–100",
+};
+
+function updateTableView(state) {
+  const body = el("table-view-body");
+  if (el("table-view").classList.contains("hidden")) return;
+  const rows = [];
+  for (const name in state.series) {
+    for (const point of state.series[name]) rows.push([point[0], name, point[1]]);
+  }
+  for (const p of state.track) {
+    rows.push([p[0], "target_x_cm", p[1]]);
+    rows.push([p[0], "target_y_cm", p[2]]);
+    rows.push([p[0], "target_z_cm", p[3]]);
+  }
+  rows.sort((a, b) => b[0] - a[0]);
+  clear(body);
+  for (const [ts, name, value] of rows.slice(0, 400)) {
+    const row = document.createElement("tr");
+    row.innerHTML =
+      `<td class="num mono">${clockText(ts)}</td>` +
+      `<td class="name">${name}</td>` +
+      `<td class="num">${value}</td>` +
+      `<td>${UNITS[name] || "cm"}</td>`;
+    body.appendChild(row);
+  }
+}
+
+function updateLegend(state) {
+  const known = state.known_pairs.map((p) => {
+    const mark = p.verified ? "" : " (unconfirmed)";
+    return `${hex2(p.control)}/${hex2(p.command)} → ${p.name}${mark}`;
+  });
+  el("legendbar").textContent =
+    "Decoded pairs: " + known.join(" · ") +
+    ". Anything else is listed as unidentified with its raw bytes rather than guessed at.";
+}
+
+/* ---------- render loop ---------- */
+
+function render() {
+  if (!latest) return;
+  const state = latest;
+  updateHeader(state);
+  updateTiles(state);
+  updateMessages(state);
+  updateLog(state);
+  updateTableView(state);
+  updateLegend(state);
+
+  const series = state.series || {};
+  renderLine("chart-heart", series.heart_rate_bpm, { color: "var(--series-1)", unit: "bpm", digits: 0 });
+  renderLine("chart-breath", series.breathing_rate_bpm, { color: "var(--series-2)", unit: "breaths/min", digits: 0 });
+  renderLine("chart-distance", series.target_distance_cm, { color: "var(--series-3)", unit: "cm", digits: 0, clampZero: true });
+  renderLine("chart-movement", series.body_movement, { color: "var(--series-1)", unit: "", digits: 0, floor: 0, clampZero: true });
+  renderPosition(state.track || []);
+
+  const nowOf = (name, digits) => {
+    const points = series[name];
+    return points && points.length ? fmt(points[points.length - 1][1], digits) : "—";
+  };
+  el("chart-heart-now").textContent = nowOf("heart_rate_bpm", 0);
+  el("chart-breath-now").textContent = nowOf("breathing_rate_bpm", 0);
+  el("chart-distance-now").textContent = nowOf("target_distance_cm", 0);
+  el("chart-movement-now").textContent = nowOf("body_movement", 0);
+}
+
+/* ---------- transport ---------- */
+
+function connect() {
+  const source = new EventSource("/events");
+  source.onmessage = (evt) => {
+    try {
+      latest = JSON.parse(evt.data);
+    } catch (err) {
+      return;
+    }
+    render();
+  };
+  source.onerror = () => {
+    // Hold the last render rather than flashing a skeleton; EventSource
+    // retries on its own.
+    const chip = el("link-chip");
+    chip.classList.remove("good");
+    chip.classList.add("critical");
+    el("link-text").textContent = "Reconnecting";
+  };
+}
+
+/* ---------- controls ---------- */
+
+el("theme-toggle").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const current = root.getAttribute("data-theme");
+  const effective = current === "auto" ? (dark ? "dark" : "light") : current;
+  root.setAttribute("data-theme", effective === "dark" ? "light" : "dark");
+  render();
+});
+
+el("table-toggle").addEventListener("click", (evt) => {
+  const panel = el("table-view");
+  const shown = panel.classList.toggle("hidden") === false;
+  evt.currentTarget.setAttribute("aria-pressed", String(shown));
+  if (shown && latest) updateTableView(latest);
+});
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(render, 120);
+});
+
+connect();
+</script>
+</body>
+</html>
