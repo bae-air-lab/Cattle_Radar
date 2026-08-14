@@ -17,6 +17,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 r60a-record = "r60a.record:main"
+r60a-recorder = "r60a.recorder:main"
 r60a-visualize = "r60a.visualize:main"
 
 [tool.setuptools]

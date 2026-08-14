@@ -9,4 +9,5 @@ dist/
 # Your own recorded sessions. data/sample_session.csv is checked in on purpose
 # so the dashboard can be replayed without hardware.
 data/*.csv
+data/*.json
 !data/sample_session.csv

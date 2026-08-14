@@ -46,9 +46,15 @@ _PORT_DENYLIST: tuple[str, ...] = ("bluetooth", "debug-console")
 _DEVICE_PREFIXES: tuple[str, ...] = (
     "/dev/ttyUSB",
     "/dev/ttyACM",
+    "/dev/ttyAMA",
+    "/dev/tty.usbserial",
+    "/dev/tty.usbmodem",
     "/dev/cu.usbserial",
     "/dev/cu.wchusbserial",
     "/dev/cu.SLAB",
+    "/dev/tty.wchusbserial",
+    "/dev/tty.SLABUSBtoUART",
+    "COM",
 )
 
 

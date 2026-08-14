@@ -30,6 +30,7 @@ a capture tool that writes tidy CSV, and a live web dashboard.
 - [How this protocol was established](#how-this-protocol-was-established)
 - [Architecture](#architecture)
 - [The tools in detail](#the-tools-in-detail)
+- [Are these vitals real?](#are-these-vitals-real)
 - [CSV format](#csv-format)
 - [Extending the decoder](#extending-the-decoder)
 - [Testing](#testing)
@@ -57,14 +58,17 @@ python3 -m r60a.visualize --port auto --baud auto
 
 # Log 60 seconds to CSV with a live terminal readout
 python3 -m r60a.record --port auto --baud auto --out data/session.csv --duration 60
+
+# Per-subject sessions from a small desktop UI, saved as data/<id>.json
+python3 -m r60a.recorder
 ```
 
 `--port auto` scans for a USB-serial adapter; `--baud auto` samples each
 candidate rate and keeps the one that yields checksum-valid frames. Both accept
 explicit values (`--port /dev/ttyUSB0 --baud 115200`) when you already know.
 
-After `pip install -e .` the console scripts `r60a-record` and `r60a-visualize`
-work without the `python3 -m` prefix. Everything also runs straight from a
+After `pip install -e .` the console scripts `r60a-record`, `r60a-recorder` and
+`r60a-visualize` work without the `python3 -m` prefix. Everything also runs straight from a
 clone with no install at all, as long as `pyserial` is importable.
 
 ---
@@ -248,12 +252,13 @@ in the dashboard as *unidentified*.
                     │  decode()        │   pass through untouched
                     └────────┬─────────┘
                              ▼  list[Reading] | UnknownFrame
-              ┌──────────────┴──────────────┐
-              ▼                             ▼
-      ┌───────────────┐            ┌──────────────────┐
-      │  record.py    │            │  visualize.py    │
-      │  CSV + TUI    │            │  HTTP + SSE      │──▶ browser dashboard
-      └───────────────┘            └──────────────────┘
+        ┌────────────────────┼────────────────────┐
+        ▼                    ▼                    ▼
+┌───────────────┐   ┌──────────────────┐  ┌──────────────────┐
+│  record.py    │   │  recorder.py     │  │  visualize.py    │
+│  CSV + TUI    │   │  VitalsGate      │  │  HTTP + SSE      │──▶ dashboard
+└───────────────┘   │  + Tk UI → JSON  │  └──────────────────┘
+                    └──────────────────┘
 ```
 
 | File | Role |
@@ -261,6 +266,7 @@ in the dashboard as *unidentified*.
 | [`r60a/protocol.py`](r60a/protocol.py) | Framing, checksums, `MESSAGE_MAP`, the streaming `FrameParser`, `decode()`. Pure logic, no I/O — this is the file to read first. |
 | [`r60a/discovery.py`](r60a/discovery.py) | Port scanning and baud probing. A baud rate only wins if it produces checksum-valid frames. |
 | [`r60a/record.py`](r60a/record.py) | Capture CLI: CSV writer, live terminal display, reconnect-with-backoff, session summary. |
+| [`r60a/recorder.py`](r60a/recorder.py) | Per-subject session recorder: `VitalsGate` (the validity checks), `RecorderCore` (session state, warm-up, sampling, JSON document) and a Tk front end that only polls the core. |
 | [`r60a/visualize.py`](r60a/visualize.py) | Standard-library HTTP server streaming state to the browser over server-sent events. Also the CSV replay engine. |
 | [`r60a/static/dashboard.html`](r60a/static/dashboard.html) | The whole dashboard — HTML, CSS and hand-rolled SVG charts in one self-contained file. No build step, no CDN, no framework. |
 | [`scripts/sniff.py`](scripts/sniff.py) | Standalone discovery tool, deliberately dependency-free and independent of the package. |
@@ -315,6 +321,60 @@ Ctrl-C flushes the CSV and prints a summary.
 | `--no-live` | off | disable the live display (for logging to a file) |
 | `--probe-seconds` | `3.0` | sample length per baud during `--baud auto` |
 
+### `r60a.recorder` — per-subject sessions to JSON
+
+```bash
+python3 -m r60a.recorder                       # auto port, auto baud
+python3 -m r60a.recorder --port /dev/ttyUSB0 --baud 115200 --outdir data
+```
+
+A small Tk window: type an ID, press **Start**. The recorder reads the radar for
+15 seconds *without keeping anything* — the module needs that long to lock on
+and converge, and readings taken before it settles are worse than no readings —
+then records one sample per second until **Stop**, and writes
+`<outdir>/<id>.json`. The ID is sanitised into a safe filename stem
+(`cow 17/A` → `cow_17_A`) and shown back to you before recording starts; an
+existing file prompts before it is overwritten.
+
+While it runs the window shows the live heart rate, breathing rate, distance,
+motion state and body movement with the age of each value, plus a verdict line
+that says whether the current vitals are believable and, when they are not,
+why. That verdict is the point of the tool — see
+[Are these vitals real?](#are-these-vitals-real).
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--outdir` | `data` | directory for `<id>.json` |
+| `--warmup` | `15` | seconds to read without recording while the radar settles |
+| `--rate` | `1.0` | samples per second |
+| `--max-distance` | `250` | reject vitals when the target is further away (cm) |
+| `--hr-min` / `--hr-max` | `35` / `150` | plausible heart-rate band |
+| `--br-min` / `--br-max` | `5` / `60` | plausible breathing-rate band |
+| `--freeze-window` | `20` | seconds of an unchanging vital before it counts as latched |
+| `--no-gate` | off | mark everything valid; reject reasons are still logged |
+| `--drop-invalid` | off | omit rejected samples instead of flagging them |
+
+Each sample is one object with every field, an `occupied` flag, a `valid` flag
+and a `reject` list. The file also carries a `quality` block (valid fraction, a
+histogram of reject reasons, frame and checksum counts) and a `summary` block
+with mean/median/stdev/min/max **computed over the valid samples only** —
+averaging in the rejected ones is how a free-running radar ends up in a results
+table.
+
+```json
+{
+  "t": 12.0,
+  "iso_time": "2026-08-14T15:01:23.400-04:00",
+  "heart_rate_bpm": 74,
+  "breathing_rate_bpm": 17,
+  "target_distance_cm": 61.0,
+  "motion_state": 2,
+  "occupied": true,
+  "valid": true,
+  "reject": []
+}
+```
+
 ### `r60a.visualize` — live dashboard
 
 ```bash
@@ -356,6 +416,49 @@ Run this first against unfamiliar hardware. It reports the winning baud rate, a
 hexdump, frame rate, frame lengths, and every `(control, command)` pair it saw
 with counts. It is intentionally standalone — no imports from `r60a` — so it
 still works when the protocol assumptions in the package are wrong.
+
+---
+
+## Are these vitals real?
+
+Often not, and the frame does not tell you. **The R60A's vital-signs engine
+free-runs.** It keeps publishing `0x85 0x02` heart-rate and `0x81 0x02`
+breathing frames when nobody is in front of the antenna — hold the module
+behind a laptop lid, walk out of the room, and a perfectly plausible 78 bpm
+keeps arriving. It is the last value the engine locked onto, replayed. Nothing
+in the protocol distinguishes that from a live measurement, so
+`r60a/recorder.py` reconstructs the missing context in `VitalsGate`:
+
+| Check | Rejects |
+|---|---|
+| **Occupancy** | vitals with no target behind them |
+| **Range** | a target beyond `--max-distance` (250 cm), where the engine cannot resolve chest motion |
+| **Plausibility** | zero, and anything outside the configured bpm bands |
+| **Freshness** | a vital whose last frame is more than 6 s old |
+| **Freeze** | a value that has not changed by a single bpm in 20 s |
+
+The freeze check is the one that catches the phantom reading. A real cardiac or
+respiratory estimate jitters by a bpm or two from frame to frame; a
+bit-identical value held across a 20-second window is the module replaying its
+lock, which is exactly what it does when the subject leaves or is occluded.
+
+Occupancy is awkward on this hardware because **`0x80 0x01` (presence) has
+never been observed** — see [open
+questions](#design-decisions-and-open-questions). So the gate infers it from a
+fresh non-zero motion state or a fresh in-range distance, and upgrades to the
+reported presence bit automatically if your module does emit one. The
+`quality.presence_field_reported` flag in the JSON records which of the two you
+got.
+
+None of this is thrown away. Rejected samples are still written, flagged, with
+the reasons attached, so a session can be audited rather than silently
+shortened. `--no-gate` records everything as valid while still logging the
+reasons, which is the right setting when you are characterising the module's
+behaviour rather than measuring a subject.
+
+Thresholds are wide enough for a resting adult (HR 55–90, breathing 12–25) and
+for cattle (HR 48–84, breathing 26–50). Narrow them for a single species when
+you want a stricter filter.
 
 ---
 
@@ -434,7 +537,7 @@ Guard rails worth preserving if you refactor:
 python3 -m pytest -q
 ```
 
-35 tests, no hardware required, about a second. Coverage:
+57 tests, no hardware required, about a second. Coverage:
 
 | Area | Cases |
 |---|---|
@@ -443,6 +546,8 @@ python3 -m pytest -q
 | Integrity | corrupted checksum byte; corrupted payload with an intact checksum; bad frames kept and counted, not dropped |
 | Decoding | each known message; sign-magnitude coordinates; unknown pairs surfaced not guessed; short payload on a known pair rejected |
 | Robustness | buffer bounded against endless garbage; `reset()` clears partial frames |
+| Validity gating | present subject passes; no occupancy evidence; latched heart rate held for 30 s; freeze not called on too little history; stale after the frames stop; zero and out-of-band values; target out of range; reported presence overriding inferred; link down; history cleared across a reconnect |
+| Sessions | warm-up data read but not kept; recording starts on time and samples at rate; an absent subject yields a file of flagged samples and a `null` summary; `--drop-invalid`; ID sanitising; the document is JSON-serialisable as built |
 | Regression | the real 950-byte capture parses to 86 frames, 0 bad checksums, 0 dropped bytes, and yields identical output at five different chunk sizes |
 
 Hand-built byte strings in the tests are real frames copied out of the capture,
@@ -504,6 +609,12 @@ are still returned and flagged, so `--keep-bad` lets you inspect them.
 **Vitals read zero or implausible values.** The subject needs to be within
 about 1.5 m, roughly facing the sensor, and reasonably still for several
 seconds. Motion swamps the cardiac signal — that is physics, not a bug.
+
+**Vitals keep arriving when nobody is there.** Not a wiring fault and not a
+decoding error — the module free-runs and replays its last lock. Record with
+`python3 -m r60a.recorder`, which flags those samples instead of believing
+them; [Are these vitals real?](#are-these-vitals-real) explains how it tells
+the difference.
 
 **Unknown pairs in the summary.** Expected and by design. Capture them with
 `--show-unknown` and add them to `MESSAGE_MAP` once you know what they mean.

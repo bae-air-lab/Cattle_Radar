@@ -452,6 +452,14 @@ def serve(state: VizState, host: str, http_port: int) -> ThreadingHTTPServer:
     return server
 
 
+def _resolve_port(requested: str) -> str:
+    if requested != "auto":
+        return requested
+    port = autodetect_port()
+    print(f"[discovery] port: {port}")
+    return port
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="r60a-visualize", description=__doc__)
     parser.add_argument("--port", default="auto", help="serial device, or 'auto'")
@@ -494,7 +502,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         source = ReplaySource(state, csv_path, args.speed)
     else:
         try:
-            port = args.port if args.port != "auto" else autodetect_port()
+            port = _resolve_port(args.port)
             if args.baud == "auto":
 
                 def report(probe: BaudProbe) -> None:
